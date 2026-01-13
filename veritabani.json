@@ -1,0 +1,50 @@
+{
+    "3772cf80-09ce-4911-ae3f-24fb48e2706d": {
+        "batch_id": "EXP_20260113_1511",
+        "material": "Carbon Fiber",
+        "operator": "admin (admin)",
+        "date": "2026-01-13 15:11:08.033758",
+        "avg_speed": 20.1,
+        "avg_temp": 123.7,
+        "total_length": 3.8623914879957852,
+        "status": "QUALITY OK",
+        "uuid": "3772cf80-09ce-4911-ae3f-24fb48e2706d",
+        "created_at_iso": "2026-01-13T15:11:26.213357"
+    },
+    "63fedf1d-2fee-4cab-b752-f43a506d5b64": {
+        "batch_id": "EXP_20260113_1841",
+        "material": "Carbon Fiber",
+        "operator": "admin (admin)",
+        "date": "2026-01-13 18:41:19.057540",
+        "avg_speed": 20.1,
+        "avg_temp": 150.0,
+        "total_length": 1.4970007193088533,
+        "status": "QUALITY OK",
+        "uuid": "63fedf1d-2fee-4cab-b752-f43a506d5b64",
+        "created_at_iso": "2026-01-13T18:41:25.455053"
+    },
+    "f8db3516-b5bf-4221-8217-b4858eb8bfec": {
+        "batch_id": "EXP_20260113_1841",
+        "material": "Aramid",
+        "operator": "admin (admin)",
+        "date": "2026-01-13 18:41:37.179514",
+        "avg_speed": 20.11,
+        "avg_temp": 150.0,
+        "total_length": 1.4218606721957525,
+        "status": "QUALITY OK",
+        "uuid": "f8db3516-b5bf-4221-8217-b4858eb8bfec",
+        "created_at_iso": "2026-01-13T18:41:43.004563"
+    },
+    "9d977db3-1aa7-4b4f-a53a-0419e1e3f9e1": {
+        "batch_id": "EXP_20260113_1842",
+        "material": "Carbon Fiber",
+        "operator": "admin (admin)",
+        "date": "2026-01-13 18:42:11.957472",
+        "avg_speed": 20.1,
+        "avg_temp": 150.0,
+        "total_length": 5.253497493386271,
+        "status": "QUALITY OK",
+        "uuid": "9d977db3-1aa7-4b4f-a53a-0419e1e3f9e1",
+        "created_at_iso": "2026-01-13T18:42:29.771101"
+    }
+}
