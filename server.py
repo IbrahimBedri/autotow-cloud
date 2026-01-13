@@ -6,11 +6,11 @@ import os
 app = Flask(__name__)
 DB_FILE = "veritabani.json"
 
-print("☁️  GÜÇLENDİRİLMİŞ LOCAL CLOUD BAŞLATILIYOR...")
+print("☁️  ENHANCED CLOUD SERVER STARTED...")
 
-# --- YARDIMCI FONKSİYONLAR (Dosya Okuma/Yazma) ---
-def veri_yukle():
-    """JSON dosyasından verileri okur."""
+# --- HELPER FUNCTIONS ---
+def load_data():
+    """Reads data from JSON file."""
     if not os.path.exists(DB_FILE):
         return {}
     try:
@@ -19,15 +19,14 @@ def veri_yukle():
     except:
         return {}
 
-def veri_kaydet(veri):
-    """Verileri JSON dosyasına yazar."""
-    mevcut = veri_yukle()
-    # Yeni veriyi ekle/güncelle
-    mevcut.update(veri)
+def save_data(data):
+    """Writes data to JSON file."""
+    current = load_data()
+    current.update(data)
     with open(DB_FILE, 'w', encoding='utf-8') as f:
-        json.dump(mevcut, f, ensure_ascii=False, indent=4)
+        json.dump(current, f, ensure_ascii=False, indent=4)
 
-# 1. VERİ KARŞILAMA KAPISI
+# 1. DATA UPLOAD ENDPOINT
 @app.route('/api/upload', methods=['POST'])
 def upload_data():
     try:
@@ -35,36 +34,34 @@ def upload_data():
         unique_id = data.get('uuid')
         
         if not unique_id:
-            # Eğer UUID gelmediyse biz oluşturalım (Hata vermesin)
             import uuid
             unique_id = str(uuid.uuid4())[:8]
             data['uuid'] = unique_id
             
-        # Veriyi DOSYAYA kaydet
-        veri_kaydet({unique_id: data})
+        save_data({unique_id: data})
         
-        print(f"\n✅ YENİ VERİ KAYDEDİLDİ! ID: {unique_id}")
+        print(f"\n✅ NEW DATA SAVED! ID: {unique_id}")
         return jsonify({"status": "success", "id": unique_id}), 200
     except Exception as e:
-        print(f"❌ HATA: {e}")
+        print(f"❌ ERROR: {e}")
         return jsonify({"error": str(e)}), 500
 
-# 2. RAPOR GÖRÜNTÜLEME KAPISI
+# 2. REPORT VIEW ENDPOINT (ENGLISH)
 @app.route('/view/<uuid>')
 def view_report(uuid):
-    tum_veriler = veri_yukle()
-    data = tum_veriler.get(uuid)
+    all_data = load_data()
+    data = all_data.get(uuid)
     
     if not data:
         return f"""
         <div style='text-align:center; padding:50px; font-family:Arial;'>
-            <h1 style='color:red;'>⚠️ Rapor Bulunamadı</h1>
-            <p>Aradığınız ID: <b>{uuid}</b> veritabanında yok.</p>
-            <p>Sunucu sıfırlanmış olabilir veya ID yanlıştır.</p>
+            <h1 style='color:red;'>⚠️ Report Not Found</h1>
+            <p>The ID you are looking for: <b>{uuid}</b> was not found.</p>
+            <p>The server might have been reset or the ID is incorrect.</p>
         </div>
         """, 404
         
-    # HTML Raporu
+    # HTML Report (English)
     html = f"""
     <html>
         <head>
@@ -87,23 +84,23 @@ def view_report(uuid):
         <body>
             <div class="container">
                 <div class="header">
-                    <h1>AutoTow Üretim Raporu</h1>
+                    <h1>AutoTow Production Report</h1>
                     <p>ID: {uuid}</p>
                 </div>
                 <div class="content">
                     <div class="row"><span class="label">Batch Name:</span> <span class="value">{data.get('batch_id', '-')}</span></div>
                     <div class="row"><span class="label">Operator:</span> <span class="value">{data.get('operator', '-')}</span></div>
-                    <div class="row"><span class="label">Malzeme:</span> <span class="value">{data.get('material', '-')}</span></div>
-                    <div class="row"><span class="label">Tarih:</span> <span class="value">{data.get('date', '-')}</span></div>
+                    <div class="row"><span class="label">Material:</span> <span class="value">{data.get('material', '-')}</span></div>
+                    <div class="row"><span class="label">Date:</span> <span class="value">{data.get('date', '-')}</span></div>
                     
                     <hr style="border:0; border-top:1px dashed #ccc; margin: 20px 0;">
                     
-                    <div class="row"><span class="label">Ort. Hız:</span> <span class="value">{data.get('avg_speed', 0)} m/min</span></div>
-                    <div class="row"><span class="label">Ort. Sıcaklık:</span> <span class="value">{data.get('avg_temp', 0)} °C</span></div>
-                    <div class="row"><span class="label">Toplam Uzunluk:</span> <span class="value">{data.get('total_length', 0)} m</span></div>
+                    <div class="row"><span class="label">Avg. Speed:</span> <span class="value">{data.get('avg_speed', 0)} m/min</span></div>
+                    <div class="row"><span class="label">Avg. Temp:</span> <span class="value">{data.get('avg_temp', 0)} °C</span></div>
+                    <div class="row"><span class="label">Total Length:</span> <span class="value">{data.get('total_length', 0)} m</span></div>
                     
                     <div class="status-box">
-                        DURUM: {data.get('status', 'OK')}
+                        STATUS: {data.get('status', 'OK')}
                     </div>
                 </div>
             </div>
@@ -112,11 +109,10 @@ def view_report(uuid):
     """
     return html
 
-# 3. KONTROL KAPISI (Veri var mı diye bakmak için)
+# 3. DEBUG ENDPOINT
 @app.route('/debug')
 def debug_db():
-    return jsonify(veri_yukle())
+    return jsonify(load_data())
 
 if __name__ == '__main__':
-    # AirPlay çakışmasını önlemek için 5001 yapıyoruz
     app.run(host='0.0.0.0', port=5001, debug=True)
