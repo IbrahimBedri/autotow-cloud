@@ -1,3 +1,4 @@
+# ZORUNLU GUNCELLEME V1
 # Dosya: server.py (Full Sync Versiyon)
 import os
 from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for
