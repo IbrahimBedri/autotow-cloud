@@ -1,4 +1,3 @@
-# ZORUNLU GUNCELLEME V1
 # Dosya: server.py (Full Sync Versiyon)
 import os
 from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for
@@ -6,6 +5,8 @@ from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 import json
 import uuid
+import sqlite3
+from functools import wraps
 
 app = Flask(__name__)
 
@@ -267,7 +268,7 @@ PUBLIC_REPORT_HTML = """
             <div class="row"><span>Operator:</span> <span>{{ exp.operator }}</span></div>
             <div class="row"><span>Date:</span> <span>{{ exp.date }}</span></div>
             <hr>
-            <div class="row"><span>Total Length:</span> <span>{{ exp.total_length }} m</span></div>
+            <div class="row"><span>Speed:</span> <span>{{ exp.avg_speed }} m/min</span></div>
             <div class="status-box">{{ exp.status }}</div>
             <a href="/login" class="login-link">🔐 Yönetici Girişi</a>
         </div>
@@ -276,5 +277,140 @@ PUBLIC_REPORT_HTML = """
 </html>
 """
 
+
+
+
+
+
+# 1. Veritabanı Bağlantı Fonksiyonu
+def get_db_connection():
+    # Veritabanı dosya adının doğru olduğundan emin ol
+    conn = sqlite3.connect('autotow_system.db') 
+    conn.row_factory = sqlite3.Row
+    return conn
+
+# 2. Giriş Zorunluluğu (login_required) Tanımlaması
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Eğer kullanıcı giriş yapmamışsa login sayfasına at
+        if 'username' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+
+# ==========================================
+# --- YENİ EKLENTİ: SQL KONSOLU ---
+# ==========================================
+@app.route('/console', methods=['GET', 'POST'])
+@login_required
+def sql_console():
+    result = None
+    error = None
+    columns = None
+    query = request.form.get('query', '')
+
+    # Veritabanındaki tabloları listeleme
+    db_tables = []
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        db_tables = [row[0] for row in cur.fetchall()]
+        
+        # Sorgu geldiyse çalıştır
+        if request.method == 'POST' and query:
+            # Basit güvenlik: Silme işlemi sadece admin'e özel olsun
+            if "DROP" in query.upper() or "DELETE" in query.upper():
+                if session.get('username') != 'admin':
+                    raise Exception("Silme işlemi için yetkiniz yok!")
+
+            cur.execute(query)
+            
+            # SELECT sorgusu ise sonuçları göster
+            if query.strip().upper().startswith("SELECT"):
+                result = cur.fetchall()
+                if cur.description:
+                    columns = [desc[0] for desc in cur.description]
+            else:
+                # UPDATE/INSERT ise kaydet
+                conn.commit()
+                result = [[f"İşlem Başarılı! Etkilenen satır: {cur.rowcount}"]]
+                columns = ["Durum"]
+                
+        conn.close()
+    except Exception as e:
+        error = str(e)
+
+    # HTML Arayüzü
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>SQL Terminal</title>
+        <style>
+            body { background-color: #1e1e1e; color: #d4d4d4; font-family: 'Consolas', monospace; padding: 20px; }
+            textarea { width: 100%; height: 100px; background: #252526; color: #9cdcfe; border: 1px solid #3c3c3c; padding: 10px; font-size: 16px; }
+            button { background: #0e639c; color: white; border: none; padding: 10px 20px; cursor: pointer; margin-top: 10px;}
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { border: 1px solid #3c3c3c; padding: 8px; text-align: left; }
+            th { background-color: #2d2d2d; color: #569cd6; }
+            .error { color: #f48771; background: #3c1e1e; padding: 10px; margin-top: 10px; }
+            .sidebar { float: right; width: 200px; padding-left: 20px; color: #6a9955; border-left: 1px solid #3c3c3c; }
+            a { color: #d4d4d4; text-decoration: none; display: inline-block; margin-bottom: 20px; border-bottom: 1px solid white;}
+        </style>
+    </head>
+    <body>
+        <a href="/dashboard">← Geri Dön</a>
+        <div class="sidebar">
+            <p><strong>Tablolar:</strong></p>
+            <ul>
+                {% for table in tables %}
+                <li>{{ table }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        <h1>>_ SQL Console</h1>
+        <form method="POST">
+            <textarea name="query" placeholder="SELECT * FROM experiments...">{{ query }}</textarea>
+            <br>
+            <button type="submit">Run Query</button>
+        </form>
+        {% if error %}
+        <div class="error">HATA: {{ error }}</div>
+        {% endif %}
+        {% if columns %}
+        <table>
+            <thead>
+                <tr>
+                    {% for col in columns %}
+                    <th>{{ col }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in result %}
+                <tr>
+                    {% for cell in row %}
+                    <td>{{ cell }}</td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+    </body>
+    </html>
+    """
+    return render_template_string(html, result=result, columns=columns, error=error, query=query, tables=db_tables)
+
+# --- ☝️ YAPIŞTIRMA BURADA BİTİYOR ☝️ ---
+
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001)
+
+
