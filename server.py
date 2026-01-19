@@ -301,113 +301,176 @@ def login_required(f):
 
 
 
-# ==========================================
-# --- YENİ EKLENTİ: SQL KONSOLU ---
-# ==========================================
-@app.route('/console', methods=['GET', 'POST'])
+@app.route('/dashboard', methods=['GET', 'POST'])
 @login_required
-def sql_console():
-    result = None
-    error = None
-    columns = None
-    query = request.form.get('query', '')
+def dashboard():
+    conn = get_db_connection()
+    cur = conn.cursor()
 
-    # Veritabanındaki tabloları listeleme
-    db_tables = []
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        db_tables = [row[0] for row in cur.fetchall()]
-        
-        # Sorgu geldiyse çalıştır
-        if request.method == 'POST' and query:
-            # Basit güvenlik: Silme işlemi sadece admin'e özel olsun
-            if "DROP" in query.upper() or "DELETE" in query.upper():
-                if session.get('username') != 'admin':
-                    raise Exception("Silme işlemi için yetkiniz yok!")
+    # --- 1. SQL KONSOL MANTIĞI ---
+    query_result = None
+    query_error = None
+    query_columns = None
+    query_msg = None
+    sql_query = request.form.get('query', '') # Formdan gelen sorgu
 
-            cur.execute(query)
-            
-            # SELECT sorgusu ise sonuçları göster
-            if query.strip().upper().startswith("SELECT"):
-                result = cur.fetchall()
+    # Eğer "Sorguyu Çalıştır" butonuna basıldıysa
+    if request.method == 'POST' and 'btn_sql' in request.form:
+        try:
+            if not sql_query.strip():
+                raise Exception("Sorgu boş olamaz!")
+
+            # Güvenlik: Silme işlemini sadece admin yapabilsin
+            if ("DELETE" in sql_query.upper() or "DROP" in sql_query.upper()) and session.get('username') != 'admin':
+                raise Exception("Silme işlemi için yetkiniz yok!")
+
+            cur.execute(sql_query)
+
+            if sql_query.strip().upper().startswith("SELECT"):
+                query_result = cur.fetchall()
                 if cur.description:
-                    columns = [desc[0] for desc in cur.description]
+                    query_columns = [desc[0] for desc in cur.description]
             else:
-                # UPDATE/INSERT ise kaydet
                 conn.commit()
-                result = [[f"İşlem Başarılı! Etkilenen satır: {cur.rowcount}"]]
-                columns = ["Durum"]
-                
-        conn.close()
-    except Exception as e:
-        error = str(e)
+                query_msg = f"✅ İşlem Başarılı! Etkilenen satır: {cur.rowcount}"
+        except Exception as e:
+            query_error = str(e)
 
-    # HTML Arayüzü
+    # --- 2. STANDART DENEY LİSTESİ (Her zaman görünür) ---
+    experiments = conn.execute('SELECT * FROM experiments ORDER BY id DESC').fetchall()
+    conn.close()
+
+    # --- 3. HTML ARAYÜZÜ ---
     html = """
     <!DOCTYPE html>
     <html>
     <head>
-        <title>SQL Terminal</title>
+        <title>AutoTow Dashboard</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-            body { background-color: #1e1e1e; color: #d4d4d4; font-family: 'Consolas', monospace; padding: 20px; }
-            textarea { width: 100%; height: 100px; background: #252526; color: #9cdcfe; border: 1px solid #3c3c3c; padding: 10px; font-size: 16px; }
-            button { background: #0e639c; color: white; border: none; padding: 10px 20px; cursor: pointer; margin-top: 10px;}
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #3c3c3c; padding: 8px; text-align: left; }
-            th { background-color: #2d2d2d; color: #569cd6; }
-            .error { color: #f48771; background: #3c1e1e; padding: 10px; margin-top: 10px; }
-            .sidebar { float: right; width: 200px; padding-left: 20px; color: #6a9955; border-left: 1px solid #3c3c3c; }
-            a { color: #d4d4d4; text-decoration: none; display: inline-block; margin-bottom: 20px; border-bottom: 1px solid white;}
+            body { font-family: 'Segoe UI', sans-serif; background: #f4f6f9; margin: 0; padding: 20px; }
+            .container { max-width: 1000px; margin: 0 auto; }
+            
+            /* Kart Tasarımı */
+            .card { background: white; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); padding: 20px; margin-bottom: 20px; }
+            h1, h2 { color: #2c3e50; margin-top: 0; }
+            
+            /* Tablo Tasarımı */
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+            th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+            th { background-color: #f8f9fa; color: #7f8c8d; font-weight: 600; font-size: 14px; }
+            tr:hover { background-color: #f1f1f1; }
+            
+            /* Status Renkleri */
+            .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+            .badge-ok { background: #d4edda; color: #155724; }
+            .badge-err { background: #f8d7da; color: #721c24; }
+
+            /* SQL Konsol Alanı (Açılır Kapanır) */
+            details { background: #2c3e50; color: white; padding: 10px; border-radius: 8px; margin-bottom: 20px; }
+            summary { cursor: pointer; font-weight: bold; outline: none; }
+            .sql-box { margin-top: 15px; padding: 10px; background: #34495e; border-radius: 5px; }
+            textarea { width: 100%; height: 80px; background: #2c3e50; color: #ecf0f1; border: 1px solid #7f8c8d; padding: 10px; font-family: monospace; }
+            .btn-run { background: #3498db; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; margin-top: 10px; }
+            .btn-run:hover { background: #2980b9; }
+            
+            .error-box { background: #e74c3c; color: white; padding: 10px; border-radius: 4px; margin-top: 10px; }
+            .success-box { background: #27ae60; color: white; padding: 10px; border-radius: 4px; margin-top: 10px; }
+            
+            /* Linkler */
+            a.btn-view { text-decoration: none; color: #3498db; font-weight: bold; }
+            .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+            .logout { color: #e74c3c; text-decoration: none; }
         </style>
     </head>
     <body>
-        <a href="/dashboard">← Geri Dön</a>
-        <div class="sidebar">
-            <p><strong>Tablolar:</strong></p>
-            <ul>
-                {% for table in tables %}
-                <li>{{ table }}</li>
-                {% endfor %}
-            </ul>
+        <div class="container">
+            <div class="top-bar">
+                <h1>🎛️ Yönetim Paneli</h1>
+                <a href="/logout" class="logout">Çıkış Yap</a>
+            </div>
+
+            <details {% if query_result or query_error or query_msg %}open{% endif %}>
+                <summary>🛠️ Gelişmiş Veritabanı Sorgusu (SQL)</summary>
+                <div class="sql-box">
+                    <form method="POST">
+                        <textarea name="query" placeholder="SELECT * FROM experiments WHERE operator='admin'...">{{ sql_query }}</textarea>
+                        <br>
+                        <button type="submit" name="btn_sql" class="btn-run">Sorguyu Çalıştır</button>
+                    </form>
+
+                    {% if query_error %}
+                        <div class="error-box">HATA: {{ query_error }}</div>
+                    {% endif %}
+                    {% if query_msg %}
+                        <div class="success-box">{{ query_msg }}</div>
+                    {% endif %}
+
+                    {% if query_result %}
+                        <div style="overflow-x: auto; background: white; margin-top: 10px; border-radius: 4px;">
+                            <table style="color: #333;">
+                                <thead>
+                                    <tr>
+                                        {% for col in query_columns %}
+                                        <th>{{ col }}</th>
+                                        {% endfor %}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for row in query_result %}
+                                    <tr>
+                                        {% for cell in row %}
+                                        <td>{{ cell }}</td>
+                                        {% endfor %}
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% endif %}
+                </div>
+            </details>
+
+            <div class="card">
+                <h2>📊 Son Deneyler</h2>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Batch</th>
+                                <th>Malzeme</th>
+                                <th>Operatör</th>
+                                <th>Durum</th>
+                                <th>İşlem</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for exp in experiments %}
+                            <tr>
+                                <td>{{ exp['id'] }}</td>
+                                <td>{{ exp['batch_id'] }}</td>
+                                <td>{{ exp['material'] }}</td>
+                                <td>{{ exp['operator'] }}</td>
+                                <td>
+                                    <span class="badge {% if exp['status'] == 'COMPLETED' %}badge-ok{% else %}badge-err{% endif %}">
+                                        {{ exp['status'] }}
+                                    </span>
+                                </td>
+                                <td><a href="/view/{{ exp['uuid'] }}" class="btn-view" target="_blank">Raporu Gör →</a></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
-        <h1>>_ SQL Console</h1>
-        <form method="POST">
-            <textarea name="query" placeholder="SELECT * FROM experiments...">{{ query }}</textarea>
-            <br>
-            <button type="submit">Run Query</button>
-        </form>
-        {% if error %}
-        <div class="error">HATA: {{ error }}</div>
-        {% endif %}
-        {% if columns %}
-        <table>
-            <thead>
-                <tr>
-                    {% for col in columns %}
-                    <th>{{ col }}</th>
-                    {% endfor %}
-                </tr>
-            </thead>
-            <tbody>
-                {% for row in result %}
-                <tr>
-                    {% for cell in row %}
-                    <td>{{ cell }}</td>
-                    {% endfor %}
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        {% endif %}
     </body>
     </html>
     """
-    return render_template_string(html, result=result, columns=columns, error=error, query=query, tables=db_tables)
-
-# --- ☝️ YAPIŞTIRMA BURADA BİTİYOR ☝️ ---
-
+    return render_template_string(html, experiments=experiments, 
+                                  query_result=query_result, query_error=query_error, 
+                                  query_columns=query_columns, sql_query=sql_query, query_msg=query_msg)
 
 
 if __name__ == '__main__':
