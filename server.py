@@ -267,7 +267,7 @@ PUBLIC_REPORT_HTML = """
             <div class="row"><span>Operator:</span> <span>{{ exp.operator }}</span></div>
             <div class="row"><span>Date:</span> <span>{{ exp.date }}</span></div>
             <hr>
-            <div class="row"><span>Toplam Uzunluk:</span> <span>{{ exp.total_length }} m</span></div>
+            <div class="row"><span>Total Length:</span> <span>{{ exp.total_length }} m</span></div>
             <div class="status-box">{{ exp.status }}</div>
             <a href="/login" class="login-link">🔐 Yönetici Girişi</a>
         </div>
