@@ -13,7 +13,7 @@ app = Flask(__name__)
 # --- AYARLAR ---
 db_url = os.environ.get('DATABASE_URL')
 
-# Eğer Cloud adresi bulunamazsa (yani senin bilgisayarındaysak), yerel bir dosya kullan
+# Eğer Cloud adresi bulunamazsa (yani senin bilgisayarındaysak), yerel bir dosya kullan1
 if not db_url:
     db_url = "sqlite:///local_test.db"  # Bilgisayarında bu isimde dosya oluşturur
     print("⚠️ UYARI: Cloud veritabanı bulunamadı, yerel 'local_test.db' kullanılıyor.")
