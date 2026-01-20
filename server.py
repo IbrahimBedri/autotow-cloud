@@ -7,6 +7,7 @@ import json
 import uuid
 import sqlite3
 from functools import wraps
+from sqlalchemy import text
 
 app = Flask(__name__)
 
@@ -304,15 +305,12 @@ def login_required(f):
 @app.route('/dashboard', methods=['GET', 'POST'])
 @login_required
 def dashboard():
-    conn = get_db_connection()
-    cur = conn.cursor()
-
     # --- 1. SQL KONSOL MANTIĞI ---
     query_result = None
     query_error = None
     query_columns = None
     query_msg = None
-    sql_query = request.form.get('query', '') # Formdan gelen sorgu
+    sql_query = request.form.get('query', '')
 
     # Eğer "Sorguyu Çalıştır" butonuna basıldıysa
     if request.method == 'POST' and 'btn_sql' in request.form:
@@ -324,21 +322,28 @@ def dashboard():
             if ("DELETE" in sql_query.upper() or "DROP" in sql_query.upper()) and session.get('username') != 'admin':
                 raise Exception("Silme işlemi için yetkiniz yok!")
 
-            cur.execute(sql_query)
+            # SQLAlchemy ile sorguyu çalıştır (En güvenli yöntem)
+            result_proxy = db.session.execute(text(sql_query))
 
             if sql_query.strip().upper().startswith("SELECT"):
-                query_result = cur.fetchall()
-                if cur.description:
-                    query_columns = [desc[0] for desc in cur.description]
+                # Sonuçları al
+                query_result = result_proxy.fetchall()
+                query_columns = result_proxy.keys() # Sütun isimleri
             else:
-                conn.commit()
-                query_msg = f"✅ İşlem Başarılı! Etkilenen satır: {cur.rowcount}"
+                # UPDATE/INSERT ise kaydet
+                db.session.commit()
+                query_msg = f"✅ İşlem Başarılı! Etkilenen satır: {result_proxy.rowcount}"
         except Exception as e:
+            db.session.rollback() # Hata olursa geri al
             query_error = str(e)
 
     # --- 2. STANDART DENEY LİSTESİ (Her zaman görünür) ---
-    experiments = conn.execute('SELECT * FROM experiments ORDER BY id DESC').fetchall()
-    conn.close()
+    # SQLAlchemy kullanarak veriyi çekiyoruz
+    try:
+        experiments_proxy = db.session.execute(text('SELECT * FROM experiments ORDER BY id DESC'))
+        experiments = experiments_proxy.fetchall()
+    except:
+        experiments = [] # Tablo henüz yoksa hata vermesin
 
     # --- 3. HTML ARAYÜZÜ ---
     html = """
@@ -448,16 +453,16 @@ def dashboard():
                         <tbody>
                             {% for exp in experiments %}
                             <tr>
-                                <td>{{ exp['id'] }}</td>
-                                <td>{{ exp['batch_id'] }}</td>
-                                <td>{{ exp['material'] }}</td>
-                                <td>{{ exp['operator'] }}</td>
+                                <td>{{ exp.id }}</td>
+                                <td>{{ exp.batch_id }}</td>
+                                <td>{{ exp.material }}</td>
+                                <td>{{ exp.operator }}</td>
                                 <td>
-                                    <span class="badge {% if exp['status'] == 'COMPLETED' %}badge-ok{% else %}badge-err{% endif %}">
-                                        {{ exp['status'] }}
+                                    <span class="badge {% if exp.status == 'COMPLETED' %}badge-ok{% else %}badge-err{% endif %}">
+                                        {{ exp.status }}
                                     </span>
                                 </td>
-                                <td><a href="/view/{{ exp['uuid'] }}" class="btn-view" target="_blank">Raporu Gör →</a></td>
+                                <td><a href="/view/{{ exp.uuid }}" class="btn-view" target="_blank">Raporu Gör →</a></td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -475,5 +480,3 @@ def dashboard():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001)
-
-
