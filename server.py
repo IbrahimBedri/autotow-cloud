@@ -379,7 +379,7 @@ def reset_db_force():
     # DİKKAT: Bu işlem Cloud üzerindeki tüm verileri siler ve tabloyu yeniden yaratır.
     try:
         db.drop_all()   # Eski tabloları sil
-        db.create_all() # Yeni sütunlarla (logs dahil) tekrar oluştur
+        db.create_all() # Yeni sütunlarla (logs dahil) tekrar oluşturr
         
         # Admin kullanıcısını tekrar ekle
         if not User.query.filter_by(username='master').first():
