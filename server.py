@@ -374,5 +374,25 @@ with app.app_context():
         db.session.commit()
         print("✅ Varsayılan admin oluşturuldu: admin / admin123")
 
+# ==========================================
+# --- VERİTABANI SIFIRLAMA VE TAMİR ROTASI ---
+# ==========================================
+@app.route('/reset_db_force')
+def reset_db_force():
+    # DİKKAT: Bu işlem Cloud üzerindeki tüm verileri siler ve tabloyu yeniden yaratır.
+    try:
+        db.drop_all()   # Eski tabloları sil
+        db.create_all() # Yeni sütunlarla (logs dahil) tekrar oluştur
+        
+        # Admin kullanıcısını tekrar ekle
+        if not User.query.filter_by(username='admin').first():
+            hashed = generate_password_hash('admin123')
+            db.session.add(User(username='admin', password_hash=hashed, role='admin'))
+            db.session.commit()
+            
+        return "✅ BAŞARILI: Veritabanı sıfırlandı, 'logs' sütunu eklendi ve Admin oluşturuldu!"
+    except Exception as e:
+        return f"❌ HATA: {str(e)}"
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001)
