@@ -33,6 +33,7 @@ class User(db.Model):
     role = db.Column(db.String(20), default="operator")
 
 class Experiment(db.Model):
+    __tablename__ = 'experiment'
     id = db.Column(db.Integer, primary_key=True)
     uuid = db.Column(db.String(36), unique=True, nullable=False)
     batch_id = db.Column(db.String(50), nullable=False)
