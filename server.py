@@ -1,11 +1,15 @@
+import json
 import os
+import secrets
 import uuid
 import datetime
 from functools import wraps
-from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for
+from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for, Response
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
 from werkzeug.security import generate_password_hash, check_password_hash
+
+import produkt_seite   # Seite einer fertigen Produktspule (ohne Flask testbar)
 
 # --- AYARLAR VE BAŞLANGIÇ ---
 app = Flask(__name__)
@@ -21,7 +25,10 @@ if db_url.startswith("postgres://"):
 
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.secret_key = os.environ.get('SECRET_KEY', 'gizli_anahtar_degistirilmeli')
+# Ohne gesetzte SECRET_KEY-Umgebungsvariable wird bei jedem Start ein zufälliger
+# Schlüssel erzeugt (kein statisches, im Quellcode sichtbares Geheimnis mehr).
+# Nachteil: bestehende Sessions werden beim Neustart ungültig.
+app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 
 db = SQLAlchemy(app)
 
@@ -46,12 +53,51 @@ class Experiment(db.Model):
     status = db.Column(db.String(20))
     logs = db.Column(db.Text) # JSON string olarak saklayabiliriz
 
+class FertigeSpule(db.Model):
+    """Öffentliche Daten einer fertigen Produktspule (Etikett-QR zeigt auf /p/<id>)."""
+    __tablename__ = 'fertige_spule'
+    id = db.Column(db.String(30), primary_key=True)      # z. B. PR-00001-8
+    daten = db.Column(db.Text, nullable=False)           # JSON, siehe produkt_seite.py
+    csv = db.Column(db.Text)                             # Messdaten, 1 Hz
+    aktualisiert = db.Column(db.String(30))
+
 # --- YARDIMCI FONKSİYONLAR ---
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'username' not in session:
             return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+# FIX: Fehlte komplett - '/reset_db_force' und die SQL-Konsole waren nur über
+# 'login_required' geschützt (jeder eingeloggte Operator, nicht nur Admins).
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'username' not in session:
+            return redirect(url_for('login'))
+        if session.get('role') != 'admin':
+            return jsonify({"error": "Nur Administratoren haben Zugriff auf diese Funktion."}), 403
+        return f(*args, **kwargs)
+    return decorated_function
+
+# API-Schlüssel für die programmatische Nutzung durch die Desktop-App (kein
+# Browser-Login möglich). FIX: '/api/upload' und '/api/register_user' waren
+# vorher komplett ungeschützt - jeder im Internet konnte beliebige Datensätze
+# einspielen oder sich selbst einen 'admin'-Account anlegen.
+CLOUD_API_KEY = os.environ.get('AUTOTOW_CLOUD_API_KEY', '')
+
+def api_key_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not CLOUD_API_KEY:
+            # Kein Schlüssel konfiguriert -> Endpoint bleibt sicherheitshalber gesperrt
+            # (fail closed statt fail open).
+            return jsonify({"error": "Server not configured (AUTOTOW_CLOUD_API_KEY missing)"}), 503
+        provided_key = request.headers.get('X-API-Key', '')
+        if not secrets.compare_digest(provided_key, CLOUD_API_KEY):
+            return jsonify({"error": "Unauthorized"}), 401
         return f(*args, **kwargs)
     return decorated_function
 
@@ -127,11 +173,14 @@ def dashboard():
     if request.method == 'POST' and 'btn_sql' in request.form:
         try:
             if not sql_query.strip():
-                raise Exception("Sorgu boş olamaz!")
+                raise Exception("The query must not be empty.")
             
-            # Güvenlik: Silme işlemini sadece admin yapabilsin
-            if ("DELETE" in sql_query.upper() or "DROP" in sql_query.upper()) and session.get('username') != 'admin':
-                raise Exception("Silme işlemi için yetkiniz yok!")
+            # FIX: Die SQL-Konsole erlaubt beliebige Abfragen (auch z.B. das
+            # Auslesen aller Passwort-Hashes) - vorher konnte JEDER eingeloggte
+            # Benutzer (auch 'operator') sie nutzen, nur DELETE/DROP war auf
+            # 'admin' beschränkt. Jetzt ist die gesamte Konsole Admin-only.
+            if session.get('role') != 'admin':
+                raise Exception("The SQL console is restricted to administrators.")
 
             # SQLAlchemy ile sorguyu çalıştır (Render için uygun yöntem)
             result_proxy = db.session.execute(text(sql_query))
@@ -151,7 +200,8 @@ def dashboard():
     try:
         # SQLAlchemy ORM kullanarak verileri çekiyoruz
         experiments = Experiment.query.order_by(Experiment.id.desc()).all()
-    except:
+    except Exception as fehler:
+        print(f"[SERVER] ERROR: could not read the experiments from the database: {fehler}")
         experiments = []
 
     # 3. HTML Arayüzü
@@ -271,6 +321,7 @@ def dashboard():
 
 # --- API UÇLARI (Programdan Veri Almak İçin) ---
 @app.route('/api/upload', methods=['POST'])
+@api_key_required
 def upload_data():
     data = request.json
     try:
@@ -298,6 +349,7 @@ def upload_data():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/register_user', methods=['POST'])
+@api_key_required
 def api_register_user():
     data = request.json
     try:
@@ -315,6 +367,42 @@ def api_register_user():
         return jsonify({"message": "User created"}), 201
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# --- FERTIGE PRODUKTSPULEN (öffentlich lesbar, Upload nur mit API-Schlüssel) ---
+@app.route('/api/product', methods=['POST'])
+@api_key_required
+def api_product():
+    nutz = request.get_json(silent=True) or {}
+    try:
+        daten = produkt_seite.nutzdaten_pruefen(nutz.get('daten'), nutz.get('csv'))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    eintrag = db.session.get(FertigeSpule, daten['id'])
+    if eintrag is None:
+        eintrag = FertigeSpule(id=daten['id'])
+        db.session.add(eintrag)
+    eintrag.daten = json.dumps(daten)
+    # Messdaten nur ersetzen, wenn neue mitkommen (ein Upload ohne CSV löscht sie nicht)
+    if nutz.get('csv'):
+        eintrag.csv = nutz['csv']
+    eintrag.aktualisiert = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db.session.commit()
+    return jsonify({"message": "Product saved", "id": daten['id']}), 200
+
+@app.route('/p/<produkt_id>')
+def produkt_seite_anzeigen(produkt_id):
+    eintrag = db.session.get(FertigeSpule, produkt_id) if produkt_seite.id_gueltig(produkt_id) else None
+    if eintrag is None:
+        return "Product not found", 404
+    return produkt_seite.seite_html(json.loads(eintrag.daten), bool(eintrag.csv))
+
+@app.route('/p/<produkt_id>/data.csv')
+def produkt_daten(produkt_id):
+    eintrag = db.session.get(FertigeSpule, produkt_id) if produkt_seite.id_gueltig(produkt_id) else None
+    if eintrag is None or not eintrag.csv:
+        return "No data", 404
+    return Response(eintrag.csv, mimetype='text/csv',
+                    headers={"Content-Disposition": f"attachment; filename={produkt_id}.csv"})
 
 # --- RAPOR GÖRÜNTÜLEME ---
 @app.route('/view/<uuid_val>')
@@ -365,25 +453,44 @@ def view_report(uuid_val):
     return render_template_string(html, exp=exp)
 
 # --- BAŞLANGIÇTA ÇALIŞACAK KODLAR ---
+# Passwort des ersten Administrators ('master'). Vorher stand hier '1234' als
+# Rückfallwert - ein öffentlich im Quellcode lesbares Passwort für einen
+# öffentlich erreichbaren Server. Ohne gesetzte Umgebungsvariable wird jetzt ein
+# zufälliges erzeugt und EINMAL beim Anlegen ins Server-Log geschrieben.
+# Betrifft nur das erstmalige Anlegen: Ein bereits vorhandener 'master' behält
+# sein Passwort.
+_MASTER_AUS_UMGEBUNG = os.environ.get('AUTOTOW_CLOUD_ADMIN_PASSWORD')
+DEFAULT_MASTER_PASSWORD = _MASTER_AUS_UMGEBUNG or secrets.token_urlsafe(12)
+
 with app.app_context():
     db.create_all()
     # Varsayılan Admin (Sadece hiç kullanıcı yoksa oluşturulur)
     if not User.query.filter_by(username='master').first():
-        hashed = generate_password_hash('1234')
+        hashed = generate_password_hash(DEFAULT_MASTER_PASSWORD)
         db.session.add(User(username='master', password_hash=hashed, role='admin'))
         db.session.commit()
-        print("✅ Varsayılan admin oluşturuldu: master / 1234")
+        if _MASTER_AUS_UMGEBUNG:
+            print("[SERVER] Default admin created: master / (AUTOTOW_CLOUD_ADMIN_PASSWORD)")
+        else:
+            print("[SERVER] WARNING: AUTOTOW_CLOUD_ADMIN_PASSWORD is not set. "
+                  f"Admin 'master' created with the generated password: {DEFAULT_MASTER_PASSWORD}")
 
-@app.route('/reset_db_force')
+# Nur per POST: Als GET konnte schon ein einziger Link (z.B. in einer E-Mail
+# oder als Bild in einer fremden Seite), den ein angemeldeter Administrator
+# öffnet, die komplette Datenbank löschen.
+@app.route('/reset_db_force', methods=['POST'])
+@admin_required
 def reset_db_force():
     # DİKKAT: Bu işlem Cloud üzerindeki tüm verileri siler ve tabloyu yeniden yaratır.
+    # FIX: War vorher komplett ungeschützt (keine Authentifizierung) - jeder, der
+    # die URL kannte, konnte per einfachem GET-Request die gesamte Cloud-Datenbank löschen.
     try:
         db.drop_all()   # Eski tabloları sil
         db.create_all() # Yeni sütunlarla (logs dahil) tekrar oluşturr
         
         # Admin kullanıcısını tekrar ekle
         if not User.query.filter_by(username='master').first():
-            hashed = generate_password_hash('1234')
+            hashed = generate_password_hash(DEFAULT_MASTER_PASSWORD)
             db.session.add(User(username='master', password_hash=hashed, role='admin'))
             db.session.commit()
             
