@@ -22,6 +22,11 @@ if not db_url:
 # Render için Postgres düzeltmesi
 if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
+# SQLAlchemy 2.1 nimmt bei "postgresql://" den neuen Treiber 'psycopg' (v3), installiert
+# ist aber 'psycopg2' (requirements.txt) - der Start scheiterte mit
+# "No module named 'psycopg'". Treiber deshalb ausdrücklich nennen.
+if db_url.startswith("postgresql://"):
+    db_url = db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
